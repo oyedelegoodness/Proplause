@@ -13,42 +13,43 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Please upload a PDF file" }, { status: 400 });
     }
 
+    if (file.size > 20 * 1024 * 1024) {  // Limit to 20MB for safety
+      return NextResponse.json({ error: "PDF file is too large. Use a smaller file (max 20MB)." }, { status: 400 });
+    }
+
     const bytes = await file.arrayBuffer();
     const base64 = Buffer.from(bytes).toString('base64');
 
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash"   // ← Best one for your use case
+    // BEST MODEL RIGHT NOW for your case (more stable with many API keys)
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash-lite"
     });
 
-    const prompt = `You are a strict and experienced OAU lecturer setting real university exam questions.
+    const prompt = `You are a strict and experienced OAU lecturer creating real university OBJ (Computer Based Test) questions.
 
-Generate exactly ${numQuestions} high-quality, exam-standard Objective (MCQ) questions from the uploaded lecture note.
+Generate exactly ${numQuestions} high-quality, exam-standard multiple choice questions from the uploaded lecture note.
 
-Focus on:
-- Important concepts, definitions, principles, diagrams, and applications
-- Make questions tricky but fair (real exam level)
-- Test deep understanding
-
-Each question must have:
-- Exactly 4 options: A, B, C, D
+Requirements:
+- Focus on key concepts, definitions, principles, applications, and important diagrams
+- Make questions tricky but fair like real OAU exams
+- Test proper understanding
+- Exactly 4 options per question: A, B, C, D
 - Only ONE correct answer
-- A short, clear explanation
+- Short and clear explanation for the correct answer
 
-Format **exactly** like this (nothing else):
+Output **exactly** in this format (nothing else):
 
-Question 1: What is the primary function of the Krebs cycle?
-A) Glycolysis
-B) ATP production through oxidation
-C) Protein synthesis
-D) DNA replication
-
+Question 1: Question text here?
+A) Option one
+B) Option two
+C) Option three
+D) Option four
 Correct Answer: B
-Explanation: The Krebs cycle (citric acid cycle) is central to cellular respiration for generating energy.
+Explanation: Brief explanation why this is correct.
 
 Question 2: ...
-Continue until Question ${numQuestions}.
 
-Now generate the questions based on the PDF:`;
+Continue until you reach Question ${numQuestions}.`;
 
     const result = await model.generateContent([
       prompt,
@@ -69,8 +70,12 @@ Now generate the questions based on the PDF:`;
 
   } catch (error: any) {
     console.error("Gemini Error:", error);
-    return NextResponse.json({ 
-      error: error.message || "Failed to generate questions. Try a smaller or clearer PDF." 
+    const errorMsg = error.message || "Failed to generate questions.";
+
+    return NextResponse.json({
+      error: errorMsg.includes("403") 
+        ? "API permission error. Try generating with fewer questions or a different PDF." 
+        : errorMsg
     }, { status: 500 });
   }
 }
