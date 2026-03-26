@@ -1,41 +1,76 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-# testing
-/coverage
+export async function POST(request: NextRequest) {
+  try {
+    const formData = await request.formData();
+    const file = formData.get('pdf') as File | null;
+    const numQuestions = parseInt(formData.get('numQuestions') as string) || 15;
 
-# next.js
-/.next/
-/out/
+    if (!file) {
+      return NextResponse.json({ error: "Please upload a PDF file" }, { status: 400 });
+    }
 
-# production
-/build
+    // Convert PDF to base64
+    const bytes = await file.arrayBuffer();
+    const base64 = Buffer.from(bytes).toString('base64');
 
-# misc
-.DS_Store
-*.pem
+    // Updated model - gemini-2.5-flash is stable and good for PDF + MCQ
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash"
+    });
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+    const prompt = `You are a strict and experienced OAU lecturer setting real university OBJ (multiple choice) exam questions.
 
-# env files (can opt-in for committing if needed)
-.env*
+Generate exactly ${numQuestions} high-quality, exam-standard Objective questions from the uploaded lecture note.
 
-# vercel
-.vercel
+Rules:
+- Focus on important concepts, definitions, principles, applications and calculations
+- Make questions tricky but fair (real exam standard)
+- Test deep understanding, not just memorization
+- Each question must have exactly 4 options: A, B, C, D
+- Only ONE correct answer per question
+- Add a short, clear explanation for the correct answer
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+Output format **exactly** like this (no extra text, no introduction, no conclusion):
+
+Question 1: What is the primary function of the Krebs cycle?
+A) Glycolysis
+B) ATP production through oxidation
+C) Protein synthesis
+D) DNA replication
+Correct Answer: B
+Explanation: The Krebs cycle is central to cellular respiration for generating energy.
+
+Question 2: ...
+
+Continue until Question ${numQuestions}.
+
+Now generate the questions based on the PDF content:`;
+
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          data: base64,
+          mimeType: "application/pdf"
+        }
+      }
+    ]);
+
+    const responseText = result.response.text();
+
+    return NextResponse.json({
+      success: true,
+      questions: responseText
+    });
+
+  } catch (error: any) {
+    console.error("Gemini Error:", error);
+    return NextResponse.json({
+      error: error.message || "Failed to generate questions. Try a smaller or clearer PDF."
+    }, { status: 500 });
+  }
+}
